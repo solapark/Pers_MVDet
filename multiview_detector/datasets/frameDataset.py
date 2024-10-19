@@ -1,3 +1,6 @@
+import sys
+sys.path.append('/home/sapark/ped/MVDet')
+
 import os
 import json
 from scipy.stats import multivariate_normal
@@ -11,7 +14,7 @@ from multiview_detector.utils.projection import *
 
 class frameDataset(VisionDataset):
     def __init__(self, base, train=True, transform=ToTensor(), target_transform=ToTensor(),
-                 reID=False, grid_reduce=4, img_reduce=4, train_ratio=0.9, force_download=True):
+                 reID=False, grid_reduce=4, img_reduce=4, train_ratio=0.9, force_download=True, fix_extrinsic_matrices=True):
         super().__init__(base.root, transform=transform, target_transform=target_transform)
 
         map_sigma, map_kernel_size = 20 / grid_reduce, 20
@@ -55,6 +58,8 @@ class frameDataset(VisionDataset):
         self.img_kernel = torch.zeros([2, 2, kernel_size, kernel_size], requires_grad=False)
         self.img_kernel[0, 0] = torch.from_numpy(img_kernel)
         self.img_kernel[1, 1] = torch.from_numpy(img_kernel)
+
+        self.fix_extrinsic_matrices = fix_extrinsic_matrices
         pass
 
     def prepare_gt(self):
@@ -146,17 +151,22 @@ class frameDataset(VisionDataset):
             if self.target_transform is not None:
                 img_gt = self.target_transform(img_gt)
             imgs_gt.append(img_gt.float())
-        return imgs, map_gt.float(), imgs_gt, frame
+
+        extrinsic_matrices = None if self.fix_extrinsic_matrices else self.base.extrinsic_matrices[frame]
+        data = [imgs, extrinsic_matrices]
+        return data, map_gt.float(), imgs_gt, frame
 
     def __len__(self):
         return len(self.map_gt.keys())
 
 
 def test():
-    from multiview_detector.datasets.Wildtrack import Wildtrack
+    from multiview_detector.datasets.Messytable import Messytable
+    #from multiview_detector.datasets.Wildtrack import Wildtrack
     # from multiview_detector.datasets.MultiviewX import MultiviewX
     from multiview_detector.utils.projection import get_worldcoord_from_imagecoord
-    dataset = frameDataset(Wildtrack(os.path.expanduser('~/Data/Wildtrack')))
+    #dataset = frameDataset(Wildtrack(os.path.expanduser('~/Data/Wildtrack')))
+    dataset = frameDataset(Messytable(os.path.expanduser('~/Data/Messytable')), train_ratio=0.5026)
     # test projection
     world_grid_maps = []
     xx, yy = np.meshgrid(np.arange(0, 1920, 20), np.arange(0, 1080, 20))
@@ -164,8 +174,9 @@ def test():
     image_coords = np.stack([xx, yy], axis=2).reshape([-1, 2])
     import matplotlib.pyplot as plt
     for cam in range(dataset.num_cam):
-        world_coords = get_worldcoord_from_imagecoord(image_coords.transpose(), dataset.base.intrinsic_matrices[cam],
-                                                      dataset.base.extrinsic_matrices[cam])
+        #world_coords = get_worldcoord_from_imagecoord(image_coords.transpose(), dataset.base.intrinsic_matrices[cam], dataset.base.extrinsic_matrices[cam])
+        world_coords = get_worldcoord_from_imagecoord(image_coords.transpose(), dataset.base.intrinsic_matrices[cam], dataset.base.extrinsic_matrices[0][cam])
+
         world_grids = dataset.base.get_worldgrid_from_worldcoord(world_coords).transpose().reshape([H, W, 2])
         world_grid_map = np.zeros(dataset.worldgrid_shape)
         for i in range(H):
@@ -179,11 +190,13 @@ def test():
                         world_grid_map[int(x), int(y)] += 1
         world_grid_map = world_grid_map != 0
         plt.imshow(world_grid_map)
-        plt.show()
+        #plt.show()
+        plt.savefig('C%d.png'%(cam))
         world_grid_maps.append(world_grid_map)
         pass
     plt.imshow(np.sum(np.stack(world_grid_maps), axis=0))
-    plt.show()
+    #plt.show()
+    plt.savefig('all_cam.png')
     pass
     imgs, map_gt, imgs_gt, _ = dataset.__getitem__(0)
     pass

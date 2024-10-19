@@ -136,7 +136,8 @@ class PerspectiveTrainer(BaseTrainer):
             # visualizing the heatmap for per-view estimation
             heatmap0_head = imgs_res[0][0, 0].detach().cpu().numpy().squeeze()
             heatmap0_foot = imgs_res[0][0, 1].detach().cpu().numpy().squeeze()
-            img0 = self.denormalize(data[0, 0]).cpu().numpy().squeeze().transpose([1, 2, 0])
+            #img0 = self.denormalize(data[0, 0]).cpu().numpy().squeeze().transpose([1, 2, 0])
+            img0 = self.denormalize(data[0][0, 0]).cpu().numpy().squeeze().transpose([1, 2, 0])
             img0 = Image.fromarray((img0 * 255).astype('uint8'))
             head_cam_result = add_heatmap_to_image(heatmap0_head, img0)
             head_cam_result.save(os.path.join(self.logdir, 'cam1_head.jpg'))

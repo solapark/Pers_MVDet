@@ -1,9 +1,12 @@
+import sys
+sys.path.append('/home/sapark/ped/MVDet')
 import os
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import kornia
+from kornia.geometry.transform import warp_perspective
 from torchvision.models.vgg import vgg11
 from multiview_detector.models.resnet import resnet18
 
@@ -11,23 +14,39 @@ import matplotlib.pyplot as plt
 
 
 class PerspTransDetector(nn.Module):
+    def get_proj_mats(self, extrinsic_matrices) :
+        imgcoord2worldgrid_matrices = self.get_imgcoord2worldgrid_matrices(self.intrinsic_matrices,
+                                                                           np.array(extrinsic_matrices),
+                                                                           self.worldgrid2worldcoord_mat)
+        proj_mats = [torch.from_numpy(self.map_zoom_mat @ imgcoord2worldgrid_matrices[cam] @ self.img_zoom_mat)
+                          for cam in range(self.num_cam)]
+        return proj_mats
+
+
     def __init__(self, dataset, arch='resnet18'):
         super().__init__()
         self.num_cam = dataset.num_cam
         self.img_shape, self.reducedgrid_shape = dataset.img_shape, dataset.reducedgrid_shape
-        imgcoord2worldgrid_matrices = self.get_imgcoord2worldgrid_matrices(dataset.base.intrinsic_matrices,
-                                                                           dataset.base.extrinsic_matrices,
-                                                                           dataset.base.worldgrid2worldcoord_mat)
         self.coord_map = self.create_coord_map(self.reducedgrid_shape + [1])
-        # img
+
         self.upsample_shape = list(map(lambda x: int(x / dataset.img_reduce), self.img_shape))
+
+        #imgcoord2worldgrid_matrices = self.get_imgcoord2worldgrid_matrices(dataset.base.intrinsic_matrices,
+        #                                                                   dataset.base.extrinsic_matrices,
+        #                                                                   dataset.base.worldgrid2worldcoord_mat)
+        self.intrinsic_matrices = dataset.base.intrinsic_matrices
+        self.worldgrid2worldcoord_mat = dataset.base.worldgrid2worldcoord_mat
+        # img
         img_reduce = np.array(self.img_shape) / np.array(self.upsample_shape)
-        img_zoom_mat = np.diag(np.append(img_reduce, [1]))
+        self.img_zoom_mat = np.diag(np.append(img_reduce, [1]))
         # map
-        map_zoom_mat = np.diag(np.append(np.ones([2]) / dataset.grid_reduce, [1]))
+        self.map_zoom_mat = np.diag(np.append(np.ones([2]) / dataset.grid_reduce, [1]))
         # projection matrices: img feat -> map feat
-        self.proj_mats = [torch.from_numpy(map_zoom_mat @ imgcoord2worldgrid_matrices[cam] @ img_zoom_mat)
-                          for cam in range(self.num_cam)]
+        #self.proj_mats = [torch.from_numpy(map_zoom_mat @ imgcoord2worldgrid_matrices[cam] @ img_zoom_mat)
+        #                  for cam in range(self.num_cam)]
+        self.fix_extrinsic_matrices = dataset.fix_extrinsic_matrices
+        if self.fix_extrinsic_matrices : 
+            self.proj_mats = self.get_proj_mats(dataset.base.extrinsic_matrices)
 
         if arch == 'vgg11':
             base = vgg11().features
@@ -54,7 +73,10 @@ class PerspTransDetector(nn.Module):
                                             nn.Conv2d(512, 1, 3, padding=4, dilation=4, bias=False)).to('cuda:0')
         pass
 
-    def forward(self, imgs, visualize=False):
+    def forward(self, data, visualize=False):
+        imgs, extrinsic_matrices = data
+        proj_mats = self.proj_mats[cam] if self.fix_extrinsic_matrices else self.get_proj_mats(extrinsic_matrices[0])
+
         B, N, C, H, W = imgs.shape
         assert N == self.num_cam
         world_features = []
@@ -65,25 +87,32 @@ class PerspTransDetector(nn.Module):
             img_feature = F.interpolate(img_feature, self.upsample_shape, mode='bilinear')
             img_res = self.img_classifier(img_feature.to('cuda:0'))
             imgs_result.append(img_res)
-            proj_mat = self.proj_mats[cam].repeat([B, 1, 1]).float().to('cuda:0')
-            world_feature = kornia.warp_perspective(img_feature.to('cuda:0'), proj_mat, self.reducedgrid_shape)
+            proj_mat = proj_mats[cam].repeat([B, 1, 1]).float().to('cuda:0')
+            world_feature = warp_perspective(img_feature.to('cuda:0'), proj_mat, self.reducedgrid_shape)
             if visualize:
                 plt.imshow(torch.norm(img_feature[0].detach(), dim=0).cpu().numpy())
-                plt.show()
+                plt.savefig('img_C%d.png'%(cam))
+                #plt.show()
                 plt.imshow(torch.norm(world_feature[0].detach(), dim=0).cpu().numpy())
-                plt.show()
+                plt.gca().invert_yaxis()  # Flip y-axis so that 0 is at the bottom
+                plt.savefig('feat_C%d.png'%(cam))
+                #plt.show()
             world_features.append(world_feature.to('cuda:0'))
 
         world_features = torch.cat(world_features + [self.coord_map.repeat([B, 1, 1, 1]).to('cuda:0')], dim=1)
         if visualize:
             plt.imshow(torch.norm(world_features[0].detach(), dim=0).cpu().numpy())
-            plt.show()
+            plt.gca().invert_yaxis()  # Flip y-axis so that 0 is at the bottom
+            plt.savefig('world_feat.png')
+            #plt.show()
         map_result = self.map_classifier(world_features.to('cuda:0'))
         map_result = F.interpolate(map_result, self.reducedgrid_shape, mode='bilinear')
 
         if visualize:
             plt.imshow(torch.norm(map_result[0].detach(), dim=0).cpu().numpy())
-            plt.show()
+            plt.gca().invert_yaxis()  # Flip y-axis so that 0 is at the bottom
+            plt.savefig('map.png')
+            #plt.show()
         return map_result, imgs_result
 
     def get_imgcoord2worldgrid_matrices(self, intrinsic_matrices, extrinsic_matrices, worldgrid2worldcoord_mat):
@@ -116,17 +145,24 @@ def test():
     from multiview_detector.datasets.frameDataset import frameDataset
     from multiview_detector.datasets.Wildtrack import Wildtrack
     from multiview_detector.datasets.MultiviewX import MultiviewX
+    from multiview_detector.datasets.Messytable import Messytable
     import torchvision.transforms as T
     from torch.utils.data import DataLoader
 
     transform = T.Compose([T.Resize([720, 1280]),  # H,W
                            T.ToTensor(),
                            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-    dataset = frameDataset(Wildtrack(os.path.expanduser('~/Data/Wildtrack')), transform=transform)
+    #dataset = frameDataset(Wildtrack(os.path.expanduser('~/Data/Wildtrack')), transform=transform)
+    dataset = frameDataset(Messytable(os.path.expanduser('~/Data/Messytable')), transform=transform, fix_extrinsic_matrices=False)
     dataloader = DataLoader(dataset, 1, False, num_workers=0)
     imgs, map_gt, imgs_gt, frame = next(iter(dataloader))
     model = PerspTransDetector(dataset)
     map_res, img_res = model(imgs, visualize=True)
+
+    plt.imshow(map_gt.squeeze().cpu().numpy())
+    plt.gca().invert_yaxis()  # Flip y-axis so that 0 is at the bottom
+    plt.savefig('map_gt.png')
+
     pass
 
 

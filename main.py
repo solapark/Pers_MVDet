@@ -44,10 +44,13 @@ def main(args):
     elif 'multiviewx' in args.dataset:
         data_path = os.path.expanduser('~/Data/MultiviewX')
         base = MultiviewX(data_path)
+    elif 'messytable' in args.dataset:
+        data_path = os.path.expanduser('~/Data/Messytable')
+        base = Messytable(data_path)
     else:
-        raise Exception('must choose from [wildtrack, multiviewx]')
-    train_set = frameDataset(base, train=True, transform=train_trans, grid_reduce=4)
-    test_set = frameDataset(base, train=False, transform=train_trans, grid_reduce=4)
+        raise Exception('must choose from [wildtrack, multiviewx, messytable]')
+    train_set = frameDataset(base, train=True, transform=train_trans, grid_reduce=4, train_ratio=args.train_ratio, fix_extrinsic_matrices=not args.var_extrinsic_matrices)
+    test_set = frameDataset(base, train=False, transform=train_trans, grid_reduce=4, train_ratio=args.train_ratio, fix_extrinsic_matrices=not args.var_extrinsic_matrices)
 
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=args.batch_size, shuffle=True,
                                                num_workers=args.num_workers, pin_memory=True)
@@ -137,7 +140,7 @@ if __name__ == '__main__':
     parser.add_argument('--variant', type=str, default='default',
                         choices=['default', 'img_proj', 'res_proj', 'no_joint_conv'])
     parser.add_argument('--arch', type=str, default='resnet18', choices=['vgg11', 'resnet18'])
-    parser.add_argument('-d', '--dataset', type=str, default='wildtrack', choices=['wildtrack', 'multiviewx'])
+    parser.add_argument('-d', '--dataset', type=str, default='wildtrack', choices=['wildtrack', 'multiviewx', 'messytable'])
     parser.add_argument('-j', '--num_workers', type=int, default=4)
     parser.add_argument('-b', '--batch_size', type=int, default=1, metavar='N',
                         help='input batch size for training (default: 1)')
@@ -150,6 +153,9 @@ if __name__ == '__main__':
     parser.add_argument('--resume', type=str, default=None)
     parser.add_argument('--visualize', action='store_true')
     parser.add_argument('--seed', type=int, default=1, help='random seed (default: None)')
+
+    parser.add_argument('--train_ratio', type=float, default=.9, help='train/test raito(messytable : .5026)')
+    parser.add_argument('--var_extrinsic_matrices', action='store_true', help='variable extrinsic matrices at scene by scene (messyTable: False)')
     args = parser.parse_args()
 
     main(args)
