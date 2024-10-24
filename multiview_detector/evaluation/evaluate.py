@@ -1,3 +1,6 @@
+import sys
+sys.path.append('/home/sapark/ped/MVDet')
+
 import numpy as np
 
 
@@ -36,15 +39,20 @@ def evaluate(res_fpath, gt_fpath, dataset='wildtrack'):
 if __name__ == "__main__":
     import os
 
-    res_fpath = os.path.abspath('test-demo.txt')
-    gt_fpath = os.path.abspath('gt-demo.txt')
-    os.chdir('../..')
-    print(os.path.abspath('.'))
+    #res_fpath = os.path.abspath('test-demo.txt')
+    #gt_fpath = os.path.abspath('gt-demo.txt')
+    #os.chdir('../..')
+    #print(os.path.abspath('.'))
+
+    gt_fpath = '/home/sapark/ped/dataset/Messytable_dataset/gt.txt'
+    #res_fpath = '/home/sapark/ped/MVDet/logs/messytable_frame/default/2024-10-19_17-03-34/test.txt'
+    res_fpath = '/home/sapark/ped/dataset/src/MVRT_testset.txt'
 
     # recall, precision, moda, modp = matlab_eval(res_fpath, gt_fpath, 'Wildtrack')
     # print(f'matlab eval: MODA {moda:.1f}, MODP {modp:.1f}, prec {precision:.1f}, rcll {recall:.1f}')
     # recall, precision, moda, modp = python_eval(res_fpath, gt_fpath, 'Wildtrack')
     # print(f'python eval: MODA {moda:.1f}, MODP {modp:.1f}, prec {precision:.1f}, rcll {recall:.1f}')
 
-    recall, precision, moda, modp = evaluate(res_fpath, gt_fpath, 'Wildtrack')
+    #recall, precision, moda, modp = evaluate(res_fpath, gt_fpath, 'Wildtrack')
+    recall, precision, moda, modp = evaluate(res_fpath, gt_fpath, 'Messytable')
     print(f'eval: MODA {moda:.1f}, MODP {modp:.1f}, prec {precision:.1f}, rcll {recall:.1f}')

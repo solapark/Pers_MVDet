@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import kornia
 from kornia.geometry.transform import warp_perspective
-from torchvision.models.vgg import vgg11
+from torchvision.models.vgg import vgg11, vgg16
 from multiview_detector.models.resnet import resnet18
 
 import matplotlib.pyplot as plt
@@ -52,6 +52,20 @@ class PerspTransDetector(nn.Module):
             base = vgg11().features
             base[-1] = nn.Sequential()
             base[-4] = nn.Sequential()
+            split = 10
+            self.base_pt1 = base[:split].to('cuda:1')
+            self.base_pt2 = base[split:].to('cuda:0')
+            out_channel = 512
+        elif arch == 'vgg16':
+            base = vgg16().features
+            base = list(base.children())
+
+            base[16] = nn.Conv2d(in_channels=256, out_channels=256, kernel_size=3, padding=2, dilation=2)
+            base[23] = nn.Conv2d(in_channels=512, out_channels=512, kernel_size=3, padding=4, dilation=4)
+            base[30] = nn.Conv2d(in_channels=512, out_channels=512, kernel_size=3, padding=8, dilation=8)
+        
+            base = nn.Sequential(*base)
+
             split = 10
             self.base_pt1 = base[:split].to('cuda:1')
             self.base_pt2 = base[split:].to('cuda:0')
@@ -156,7 +170,10 @@ def test():
     dataset = frameDataset(Messytable(os.path.expanduser('~/Data/Messytable')), transform=transform, fix_extrinsic_matrices=False)
     dataloader = DataLoader(dataset, 1, False, num_workers=0)
     imgs, map_gt, imgs_gt, frame = next(iter(dataloader))
-    model = PerspTransDetector(dataset)
+    #model = PerspTransDetector(dataset)
+    model = PerspTransDetector(dataset, arch='vgg11')
+    model.load_state_dict(torch.load('/home/sapark/ped/MVDet/logs/messytable_frame/default/2024-10-24_12-43-38/MultiviewDetector.pth'))
+
     map_res, img_res = model(imgs, visualize=True)
 
     plt.imshow(map_gt.squeeze().cpu().numpy())

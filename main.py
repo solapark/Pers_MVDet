@@ -139,7 +139,7 @@ if __name__ == '__main__':
     parser.add_argument('--alpha', type=float, default=1.0, help='ratio for per view loss')
     parser.add_argument('--variant', type=str, default='default',
                         choices=['default', 'img_proj', 'res_proj', 'no_joint_conv'])
-    parser.add_argument('--arch', type=str, default='resnet18', choices=['vgg11', 'resnet18'])
+    parser.add_argument('--arch', type=str, default='resnet18', choices=['vgg11', 'vgg16', 'resnet18'])
     parser.add_argument('-d', '--dataset', type=str, default='wildtrack', choices=['wildtrack', 'multiviewx', 'messytable'])
     parser.add_argument('-j', '--num_workers', type=int, default=4)
     parser.add_argument('-b', '--batch_size', type=int, default=1, metavar='N',
