@@ -18,10 +18,11 @@ class BaseTrainer(object):
 
 
 class PerspectiveTrainer(BaseTrainer):
-    def __init__(self, model, criterion, logdir, denormalize, cls_thres=0.4, alpha=1.0):
+    def __init__(self, model, heatmap_criterion, wh_criterion, logdir, denormalize, cls_thres=0.4, alpha=1.0):
         super(BaseTrainer, self).__init__()
         self.model = model
-        self.criterion = criterion
+        self.heatmap_criterion = heatmap_criterion
+        self.wh_criterion = wh_criterion
         self.cls_thres = cls_thres
         self.logdir = logdir
         self.denormalize = denormalize
@@ -42,8 +43,15 @@ class PerspectiveTrainer(BaseTrainer):
             t_forward += t_f - t_b
             loss = 0
             for img_res, img_gt in zip(imgs_res, imgs_gt):
-                loss += self.criterion(img_res, img_gt.to(img_res.device), data_loader.dataset.img_kernel)
-            loss = self.criterion(map_res, map_gt.to(map_res.device), data_loader.dataset.map_kernel) + \
+                img_head_foot = img_res[:, :2]
+                img_gt_head_foot = img_gt[:, :2]
+                loss += self.heatmap_criterion(img_head_foot, img_gt_head_foot.to(img_res.device), data_loader.dataset.img_kernel)
+                if self.wh_criterion is not None :
+                    img_wh = img_res[:, 2:]
+                    img_gt_wh, img_gt_mask = img_gt[:, 2:4], img_gt[:, 4:]
+                    loss += self.wh_criterion(img_wh, img_gt_mask.to(img_res.device), img_gt_wh.to(img_res.device))
+
+            loss = self.heatmap_criterion(map_res, map_gt.to(map_res.device), data_loader.dataset.map_kernel) + \
                    loss / len(imgs_gt) * self.alpha
             loss.backward()
             optimizer.step()
@@ -96,19 +104,44 @@ class PerspectiveTrainer(BaseTrainer):
                 map_res, imgs_res = self.model(data)
             if res_fpath is not None:
                 map_grid_res = map_res.detach().cpu().squeeze()
-                v_s = map_grid_res[map_grid_res > self.cls_thres].unsqueeze(1)
-                grid_ij = (map_grid_res > self.cls_thres).nonzero()
+                is_obj = map_grid_res > self.cls_thres
+                v_s = map_grid_res[is_obj].unsqueeze(1)
+                grid_ij = is_obj.nonzero()
+                
+                imgs_xywh = torch.zeros((0, len(imgs_res)*4))
+                if self.wh_criterion is not None and len(grid_ij) :
+                    imgs_xywh = []
+                    for cam, img_res in enumerate(imgs_res):
+                        img_xy = self.model.warp_xy(cam) 
+                        img_wh = self.model.warp_wh(img_res[:, 2:4], cam) 
+                        img_x, img_y = img_xy.squeeze().detach().cpu() #(H,W), (H,W)
+                        img_w, img_h = img_wh.squeeze().detach().cpu() #(H,W), (H,W)
+                        img_x = img_x[is_obj].unsqueeze(1) * self.model.img_reduce[1]
+                        img_y = img_y[is_obj].unsqueeze(1) * self.model.img_reduce[0]
+                        img_w = img_w[is_obj].unsqueeze(1) * data_loader.dataset.img_shape[1]
+                        img_h = img_h[is_obj].unsqueeze(1) * data_loader.dataset.img_shape[0]
+                        img_xywh = torch.cat([img_x, img_y, img_w, img_h], 1) #(N, 4) 
+                        imgs_xywh.append(img_xywh) 
+                    imgs_xywh = torch.cat(imgs_xywh, -1) #(N, C*4)
+
                 if data_loader.dataset.base.indexing == 'xy':
                     grid_xy = grid_ij[:, [1, 0]]
                 else:
                     grid_xy = grid_ij
+
                 all_res_list.append(torch.cat([torch.ones_like(v_s) * frame, grid_xy.float() *
-                                               data_loader.dataset.grid_reduce, v_s], dim=1))
+                                               data_loader.dataset.grid_reduce, v_s, imgs_xywh], dim=1))
 
             loss = 0
             for img_res, img_gt in zip(imgs_res, imgs_gt):
-                loss += self.criterion(img_res, img_gt.to(img_res.device), data_loader.dataset.img_kernel)
-            loss = self.criterion(map_res, map_gt.to(map_res.device), data_loader.dataset.map_kernel) + \
+                img_head_foot = img_res[:, :2]
+                img_gt_head_foot = img_gt[:, :2]
+                loss += self.heatmap_criterion(img_head_foot, img_gt_head_foot.to(img_res.device), data_loader.dataset.img_kernel)
+                if self.wh_criterion is not None :
+                    img_wh = img_res[:, 2:]
+                    img_gt_wh, img_gt_mask = img_gt[:, 2:4], img_gt[:, 4:]
+                    loss += .1 * self.wh_criterion(img_wh, img_gt_mask.to(img_res.device), img_gt_wh.to(img_res.device))
+            loss = self.heatmap_criterion(map_res, map_gt.to(map_res.device), data_loader.dataset.map_kernel) + \
                    loss / len(imgs_gt) * self.alpha
             losses += loss.item()
             pred = (map_res > self.cls_thres).int().to(map_gt.device)
@@ -128,7 +161,7 @@ class PerspectiveTrainer(BaseTrainer):
             subplt0 = fig.add_subplot(211, title="output")
             subplt1 = fig.add_subplot(212, title="target")
             subplt0.imshow(map_res.cpu().detach().numpy().squeeze())
-            subplt1.imshow(self.criterion._traget_transform(map_res, map_gt, data_loader.dataset.map_kernel)
+            subplt1.imshow(self.heatmap_criterion._traget_transform(map_res, map_gt, data_loader.dataset.map_kernel)
                            .cpu().detach().numpy().squeeze())
             plt.savefig(os.path.join(self.logdir, 'map.jpg'))
             plt.close(fig)
@@ -152,8 +185,9 @@ class PerspectiveTrainer(BaseTrainer):
             for frame in np.unique(all_res_list[:, 0]):
                 res = all_res_list[all_res_list[:, 0] == frame, :]
                 positions, scores = res[:, 1:3], res[:, 3]
+                xywhs = res[:, 4:]
                 ids, count = nms(positions, scores, 20, np.inf)
-                res_list.append(torch.cat([torch.ones([count, 1]) * frame, positions[ids[:count], :]], dim=1))
+                res_list.append(torch.cat([torch.ones([count, 1]) * frame, positions[ids[:count], :], xywhs[ids[:count]]], dim=1))
             res_list = torch.cat(res_list, dim=0).numpy() if res_list else np.empty([0, 3])
             np.savetxt(res_fpath, res_list, '%d')
 

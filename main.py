@@ -13,6 +13,7 @@ import torch.optim as optim
 import torchvision.transforms as T
 from multiview_detector.datasets import *
 from multiview_detector.loss.gaussian_mse import GaussianMSE
+from multiview_detector.loss.reg_l1_loss import RegL1Loss
 from multiview_detector.models.persp_trans_detector import PerspTransDetector
 from multiview_detector.models.image_proj_variant import ImageProjVariant
 from multiview_detector.models.res_proj_variant import ResProjVariant
@@ -49,8 +50,8 @@ def main(args):
         base = Messytable(data_path)
     else:
         raise Exception('must choose from [wildtrack, multiviewx, messytable]')
-    train_set = frameDataset(base, train=True, transform=train_trans, grid_reduce=4, train_ratio=args.train_ratio, fix_extrinsic_matrices=not args.var_extrinsic_matrices)
-    test_set = frameDataset(base, train=False, transform=train_trans, grid_reduce=4, train_ratio=args.train_ratio, fix_extrinsic_matrices=not args.var_extrinsic_matrices)
+    train_set = frameDataset(base, train=True, transform=train_trans, grid_reduce=4, train_ratio=args.train_ratio, fix_extrinsic_matrices=not args.var_extrinsic_matrices, wh_train=args.wh_train)
+    test_set = frameDataset(base, train=False, transform=train_trans, grid_reduce=4, train_ratio=args.train_ratio, fix_extrinsic_matrices=not args.var_extrinsic_matrices, wh_train=args.wh_train)
 
     train_loader = torch.utils.data.DataLoader(train_set, batch_size=args.batch_size, shuffle=True,
                                                num_workers=args.num_workers, pin_memory=True)
@@ -59,7 +60,7 @@ def main(args):
 
     # model
     if args.variant == 'default':
-        model = PerspTransDetector(train_set, args.arch)
+        model = PerspTransDetector(train_set, args.arch, args.wh_train)
     elif args.variant == 'img_proj':
         model = ImageProjVariant(train_set, args.arch)
     elif args.variant == 'res_proj':
@@ -74,7 +75,8 @@ def main(args):
                                                     epochs=args.epochs)
 
     # loss
-    criterion = GaussianMSE().cuda()
+    heatmap_criterion = GaussianMSE().cuda()
+    wh_criterion = RegL1Loss() if args.wh_train is not None else None
 
     # logging
     logdir = f'logs/{args.dataset}_frame/{args.variant}/' + datetime.datetime.today().strftime('%Y-%m-%d_%H-%M-%S') \
@@ -98,12 +100,12 @@ def main(args):
     test_prec_s = []
     test_moda_s = []
 
-    trainer = PerspectiveTrainer(model, criterion, logdir, denormalize, args.cls_thres, args.alpha)
+    trainer = PerspectiveTrainer(model, heatmap_criterion, wh_criterion, logdir, denormalize, args.cls_thres, args.alpha)
 
     # learn
     if args.resume is None:
         print('Testing...')
-        trainer.test(test_loader, os.path.join(logdir, 'test.txt'), train_set.gt_fpath, True)
+        #trainer.test(test_loader, os.path.join(logdir, 'test.txt'), train_set.gt_fpath, True)
 
         for epoch in tqdm.tqdm(range(1, args.epochs + 1)):
             print('Training...')
@@ -141,7 +143,7 @@ if __name__ == '__main__':
                         choices=['default', 'img_proj', 'res_proj', 'no_joint_conv'])
     parser.add_argument('--arch', type=str, default='resnet18', choices=['vgg11', 'vgg16', 'resnet18'])
     parser.add_argument('-d', '--dataset', type=str, default='wildtrack', choices=['wildtrack', 'multiviewx', 'messytable'])
-    parser.add_argument('-j', '--num_workers', type=int, default=4)
+    parser.add_argument('-j', '--num_workers', type=int, default=16)
     parser.add_argument('-b', '--batch_size', type=int, default=1, metavar='N',
                         help='input batch size for training (default: 1)')
     parser.add_argument('--epochs', type=int, default=10, metavar='N', help='number of epochs to train (default: 10)')
@@ -156,6 +158,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--train_ratio', type=float, default=.9, help='train/test raito(messytable : .5026)')
     parser.add_argument('--var_extrinsic_matrices', action='store_true', help='variable extrinsic matrices at scene by scene (messyTable: False)')
+    parser.add_argument('--wh_train', type=str, default=None, help='train/test raito(messytable : .5026)')
     args = parser.parse_args()
 
     main(args)

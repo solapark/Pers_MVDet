@@ -14,12 +14,13 @@ from multiview_detector.utils.projection import *
 
 class frameDataset(VisionDataset):
     def __init__(self, base, train=True, transform=ToTensor(), target_transform=ToTensor(),
-                 reID=False, grid_reduce=4, img_reduce=4, train_ratio=0.9, force_download=True, fix_extrinsic_matrices=True):
+                 reID=False, grid_reduce=4, img_reduce=4, train_ratio=0.9, force_download=True, fix_extrinsic_matrices=True, wh_train=None):
         super().__init__(base.root, transform=transform, target_transform=target_transform)
 
         map_sigma, map_kernel_size = 20 / grid_reduce, 20
         img_sigma, img_kernel_size = 10 / img_reduce, 10
         self.reID, self.grid_reduce, self.img_reduce = reID, grid_reduce, img_reduce
+        self.wh_train = wh_train
 
         self.base = base
         self.root, self.num_cam, self.num_frame = base.root, base.num_cam, base.num_frame
@@ -96,6 +97,10 @@ class frameDataset(VisionDataset):
                 foot_row_cam_s, foot_col_cam_s, v_cam_s = [[] for _ in range(self.num_cam)], \
                                                           [[] for _ in range(self.num_cam)], \
                                                           [[] for _ in range(self.num_cam)]
+                center_row_cam_s, center_col_cam_s, w_cam_s, h_cam_s = [[] for _ in range(self.num_cam)], \
+                                                          [[] for _ in range(self.num_cam)], \
+                                                          [[] for _ in range(self.num_cam)], \
+                                                          [[] for _ in range(self.num_cam)]
                 for single_pedestrian in all_pedestrians:
                     x, y = self.base.get_worldgrid_from_pos(single_pedestrian['positionID'])
                     if self.base.indexing == 'xy':
@@ -110,12 +115,19 @@ class frameDataset(VisionDataset):
                                          single_pedestrian['views'][cam]['xmax']) / 2), self.img_shape[1] - 1), 0)
                         y_head = max(single_pedestrian['views'][cam]['ymin'], 0)
                         y_foot = min(single_pedestrian['views'][cam]['ymax'], self.img_shape[0] - 1)
+                        y_center = int((y_head + y_foot)/2)
+                        w = single_pedestrian['views'][cam]['xmax'] - single_pedestrian['views'][cam]['xmin']
+                        h = single_pedestrian['views'][cam]['ymax'] - single_pedestrian['views'][cam]['ymin']
                         if x > 0 and y > 0:
                             head_row_cam_s[cam].append(y_head)
                             head_col_cam_s[cam].append(x)
                             foot_row_cam_s[cam].append(y_foot)
                             foot_col_cam_s[cam].append(x)
                             v_cam_s[cam].append(single_pedestrian['personID'] + 1 if self.reID else 1)
+                            center_row_cam_s[cam].append(y_center)
+                            center_col_cam_s[cam].append(x)
+                            w_cam_s[cam].append(w/self.base.img_shape[1])
+                            h_cam_s[cam].append(h/self.base.img_shape[0])
                 occupancy_map = coo_matrix((v_s, (i_s, j_s)), shape=self.reducedgrid_shape)
                 self.map_gt[frame] = occupancy_map
                 self.imgs_head_foot_gt[frame] = {}
@@ -124,7 +136,22 @@ class frameDataset(VisionDataset):
                                              shape=self.img_shape)
                     img_gt_foot = coo_matrix((v_cam_s[cam], (foot_row_cam_s[cam], foot_col_cam_s[cam])),
                                              shape=self.img_shape)
-                    self.imgs_head_foot_gt[frame][cam] = [img_gt_head, img_gt_foot]
+                    if self.wh_train == 'foot' : 
+                        img_gt_w = coo_matrix((w_cam_s[cam], (foot_row_cam_s[cam], foot_col_cam_s[cam])),
+                                                 shape=self.img_shape)
+                        img_gt_h = coo_matrix((h_cam_s[cam], (foot_row_cam_s[cam], foot_col_cam_s[cam])),
+                                                 shape=self.img_shape)
+                        img_gt_wh_mask = coo_matrix(([1]*len(foot_row_cam_s[cam]), (foot_row_cam_s[cam], foot_col_cam_s[cam])),
+                                                 shape=self.img_shape)
+                    else : 
+                        img_gt_w = coo_matrix((w_cam_s[cam], (center_row_cam_s[cam], center_col_cam_s[cam])),
+                                                 shape=self.img_shape)
+                        img_gt_h = coo_matrix((h_cam_s[cam], (center_row_cam_s[cam], center_col_cam_s[cam])),
+                                                 shape=self.img_shape)
+                        img_gt_wh_mask = coo_matrix(([1]*len(center_row_cam_s[cam]), (center_row_cam_s[cam], center_col_cam_s[cam])),
+                                                 shape=self.img_shape)
+
+                    self.imgs_head_foot_gt[frame][cam] = [img_gt_head, img_gt_foot, img_gt_w, img_gt_h, img_gt_wh_mask]
 
     def __getitem__(self, index):
         frame = list(self.map_gt.keys())[index]
@@ -145,7 +172,13 @@ class frameDataset(VisionDataset):
         for cam in range(self.num_cam):
             img_gt_head = self.imgs_head_foot_gt[frame][cam][0].toarray()
             img_gt_foot = self.imgs_head_foot_gt[frame][cam][1].toarray()
-            img_gt = np.stack([img_gt_head, img_gt_foot], axis=2)
+            img_gt_w = self.imgs_head_foot_gt[frame][cam][2].toarray()
+            img_gt_h = self.imgs_head_foot_gt[frame][cam][3].toarray()
+            img_gt_wh_mask = self.imgs_head_foot_gt[frame][cam][4].toarray()
+            if self.wh_train is None:
+                img_gt = np.stack([img_gt_head, img_gt_foot], axis=2)
+            else :
+                img_gt = np.stack([img_gt_head, img_gt_foot, img_gt_w, img_gt_h, img_gt_wh_mask], axis=2)
             if self.reID:
                 img_gt = (img_gt > 0).int()
             if self.target_transform is not None:
