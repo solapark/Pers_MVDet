@@ -49,7 +49,7 @@ class PerspectiveTrainer(BaseTrainer):
                 if self.wh_criterion is not None :
                     img_wh = img_res[:, 2:]
                     img_gt_wh, img_gt_mask = img_gt[:, 2:4], img_gt[:, 4:]
-                    loss += self.wh_criterion(img_wh, img_gt_mask.to(img_res.device), img_gt_wh.to(img_res.device))
+                    loss += .1 * self.wh_criterion(img_wh, img_gt_mask.to(img_res.device), img_gt_wh.to(img_res.device))
 
             loss = self.heatmap_criterion(map_res, map_gt.to(map_res.device), data_loader.dataset.map_kernel) + \
                    loss / len(imgs_gt) * self.alpha
@@ -108,7 +108,7 @@ class PerspectiveTrainer(BaseTrainer):
                 v_s = map_grid_res[is_obj].unsqueeze(1)
                 grid_ij = is_obj.nonzero()
                 
-                imgs_xywh = torch.zeros((0, len(imgs_res)*4))
+                imgs_xywh = torch.zeros((len(v_s), len(imgs_res)*4))
                 if self.wh_criterion is not None and len(grid_ij) :
                     imgs_xywh = []
                     for cam, img_res in enumerate(imgs_res):
@@ -132,8 +132,9 @@ class PerspectiveTrainer(BaseTrainer):
                 all_res_list.append(torch.cat([torch.ones_like(v_s) * frame, grid_xy.float() *
                                                data_loader.dataset.grid_reduce, v_s, imgs_xywh], dim=1))
 
+                #if batch_idx == 10 : break
             loss = 0
-            for img_res, img_gt in zip(imgs_res, imgs_gt):
+            for cam, (img_res, img_gt) in enumerate(zip(imgs_res, imgs_gt)):
                 img_head_foot = img_res[:, :2]
                 img_gt_head_foot = img_gt[:, :2]
                 loss += self.heatmap_criterion(img_head_foot, img_gt_head_foot.to(img_res.device), data_loader.dataset.img_kernel)
@@ -141,6 +142,7 @@ class PerspectiveTrainer(BaseTrainer):
                     img_wh = img_res[:, 2:]
                     img_gt_wh, img_gt_mask = img_gt[:, 2:4], img_gt[:, 4:]
                     loss += .1 * self.wh_criterion(img_wh, img_gt_mask.to(img_res.device), img_gt_wh.to(img_res.device))
+
             loss = self.heatmap_criterion(map_res, map_gt.to(map_res.device), data_loader.dataset.map_kernel) + \
                    loss / len(imgs_gt) * self.alpha
             losses += loss.item()

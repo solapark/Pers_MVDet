@@ -105,7 +105,7 @@ def main(args):
     # learn
     if args.resume is None:
         print('Testing...')
-        #trainer.test(test_loader, os.path.join(logdir, 'test.txt'), train_set.gt_fpath, True)
+        trainer.test(test_loader, os.path.join(logdir, 'test.txt'), train_set.gt_fpath, True)
 
         for epoch in tqdm.tqdm(range(1, args.epochs + 1)):
             print('Training...')

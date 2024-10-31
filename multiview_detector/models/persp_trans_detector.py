@@ -74,8 +74,8 @@ class PerspTransDetector(nn.Module):
             raise Exception('architecture currently support [vgg11, resnet18]')
         # 2.5cm -> 0.5m: 20x
         if self.wh_train :
-            self.img_wh = nn.Sequential(nn.Conv2d(out_channel, 64, 1), nn.ReLU(),
-                                            nn.Conv2d(64, 2, 1, bias=False)).to('cuda:0')
+            self.img_wh = nn.Sequential(nn.Conv2d(out_channel, 64, 3, padding=1), nn.ReLU(),
+                                            nn.Conv2d(64, 2, 1)).to('cuda:0')
 
         self.img_classifier = nn.Sequential(nn.Conv2d(out_channel, 64, 1), nn.ReLU(),
                                             nn.Conv2d(64, 2, 1, bias=False)).to('cuda:0')
