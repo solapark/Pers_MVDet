@@ -51,6 +51,7 @@ def evaluateDetection_py(res_fpath, gt_fpath, dataset_name):
 
     gtRaw = np.loadtxt(gt_fpath)
     detRaw = np.loadtxt(res_fpath)
+    if detRaw.ndim == 1 : detRaw = np.expand_dims(detRaw, axis=0)
     frames = np.unique(detRaw[:, 0]) if detRaw.size else np.zeros(0)
     frame_ctr = 0
     gt_flag = True
@@ -97,8 +98,11 @@ def evaluateDetection_py(res_fpath, gt_fpath, dataset_name):
 
 
 if __name__ == "__main__":
-    res_fpath = "../test-demo.txt"
-    gt_fpath = "../gt-demo.txt"
-    dataset_name = "Wildtrack"
+    #res_fpath = "../test-demo.txt"
+    res_fpath = "/home/sapark/ped/MVDet/logs/messytable_frame/default/2024-11-02_13-59-02/test.txt"
+    #gt_fpath = "../gt-demo.txt"
+    gt_fpath = "/home/sapark/ped/dataset/Messytable_dataset/gt.txt"
+    #dataset_name = "Wildtrack"
+    dataset_name = "Messytable"
     recall, precision, moda, modp = evaluateDetection_py(res_fpath, gt_fpath, dataset_name)
     print(f'python eval: MODA {moda:.1f}, MODP {modp:.1f}, prec {precision:.1f}, rcll {recall:.1f}')
