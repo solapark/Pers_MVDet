@@ -1,3 +1,6 @@
+import sys
+sys.path.append('/home/sapark/ped/MVDet')
+
 ### python version of matlab evaluation toolkit
 import numpy as np
 from multiview_detector.evaluation.pyeval.CLEAR_MOD_HUN import CLEAR_MOD_HUN
@@ -59,7 +62,7 @@ def evaluateDetection_py(res_fpath, gt_fpath, dataset_name):
 
     gtAllMatrix = 0
     detAllMatrix = 0
-    if detRaw is None or detRaw.shape[0] == 0:
+    if detRaw is None or detRaw.size == 0:
         MODP, MODA, recall, precision = 0, 0, 0, 0
         return MODP, MODA, recall, precision
 
@@ -99,7 +102,7 @@ def evaluateDetection_py(res_fpath, gt_fpath, dataset_name):
 
 if __name__ == "__main__":
     #res_fpath = "../test-demo.txt"
-    res_fpath = "/home/sapark/ped/MVDet/logs/messytable_frame/default/2024-11-02_13-59-02/test.txt"
+    res_fpath = "/home/sapark/ped/MVDet/logs/messytable_frame/default/2024-11-02_15-08-00/test.txt"
     #gt_fpath = "../gt-demo.txt"
     gt_fpath = "/home/sapark/ped/dataset/Messytable_dataset/gt.txt"
     #dataset_name = "Wildtrack"
